@@ -22,12 +22,16 @@ from transformers.modeling_outputs import (
 import torch
 import functools
 import operator
+import dlr
+import time
+import numpy as np
 
 
 class T5Encoder(torch.nn.Module):
     def __init__(self, encoder_sess):
         super().__init__()
         self.encoder = encoder_sess
+        self.encoder_neo = dlr.DLRModel("models/encoder/", "gpu")
 
     def forward(
         self,
@@ -39,17 +43,33 @@ class T5Encoder(torch.nn.Module):
         output_hidden_states=None,
         return_dict=None,
     ):
+        # Onnx time
+        times =[]
+        for i in range(1000):
+            start = time.time()
+            encoder_hidden_state = torch.from_numpy(
+                self.encoder.run(
+                    None,
+                    {
+                        "input_ids": input_ids.cpu().numpy(),
+                        "attention_mask": attention_mask.cpu().numpy(),
+                    },
+                )[0]
+            )
+            times.append(time.time() - start)
+        onnx_latency = np.mean(times[50:])*1000
 
-        encoder_hidden_state = torch.from_numpy(
-            self.encoder.run(
-                None,
-                {
-                    "input_ids": input_ids.cpu().numpy(),
-                    "attention_mask": attention_mask.cpu().numpy(),
-                },
-            )[0]
-        )
-
+        # Neo time
+        times = []
+        for i in range(1000):
+            start = time.time()
+            encoder_hidden_state = torch.from_numpy(self.encoder_neo.run({
+                        "input_ids": input_ids.cpu().numpy(),
+                        "attention_mask": attention_mask.cpu().numpy(),
+                    })[0])
+            times.append(time.time() - start)
+        tvm_latency = np.mean(times[50:])*1000
+        print("ENCODER: Onnx latency:", onnx_latency, "TVM latency:", tvm_latency)
         return BaseModelOutput(encoder_hidden_state)
 
 
@@ -57,17 +77,36 @@ class T5DecoderInit(torch.nn.Module):
     def __init__(self, decoder_sess):
         super().__init__()
         self.decoder = decoder_sess
+        self.decoder_neo = dlr.DLRModel("models/decoder_init/", "gpu")
 
     def forward(self, input_ids, encoder_attention_mask, encoder_hidden_states):
+        # Onnx time
+        times = []
+        for i in range(1000):
+            start = time.time()
+            decoder_outputs = self.decoder.run(
+                None,
+                {
+                    "input_ids": input_ids.cpu().numpy(),
+                    "encoder_attention_mask": encoder_attention_mask.cpu().numpy(),
+                    "encoder_hidden_states": encoder_hidden_states.cpu().numpy(),
+                },
+            )
+            times.append(time.time() - start)
+        onnx_latency = np.mean(times[50:])*1000
 
-        decoder_outputs = self.decoder.run(
-            None,
-            {
+        # Neo time
+        times = []
+        for i in range(1000):
+            start = time.time()
+            decoder_outputs = self.decoder_neo.run({
                 "input_ids": input_ids.cpu().numpy(),
                 "encoder_attention_mask": encoder_attention_mask.cpu().numpy(),
                 "encoder_hidden_states": encoder_hidden_states.cpu().numpy(),
-            },
-        )
+            })
+            times.append(time.time() - start)
+        tvm_latency = np.mean(times[50:])*1000
+        print("DECODER_INIT: Onnx latency:", onnx_latency, "TVM latency:", tvm_latency)
 
         list_pkv = tuple(torch.from_numpy(x) for x in decoder_outputs[1:])
 
@@ -82,6 +121,7 @@ class T5Decoder(torch.nn.Module):
     def __init__(self, decoder_sess):
         super().__init__()
         self.decoder = decoder_sess
+        #self.decoder = dlr.DLRModel("models/decoder/", "gpu")
 
     def forward(self, input_ids, attention_mask, encoder_output, past_key_values):
 
@@ -97,7 +137,12 @@ class T5Decoder(torch.nn.Module):
             f"pkv_{i}": pkv.cpu().numpy() for i, pkv in enumerate(flat_past_key_values)
         }
 
-        decoder_outputs = self.decoder.run(None, {**decoder_inputs, **past_key_values})
+        times = []
+        for i in range(1000):
+            start = time.time()
+            decoder_outputs = self.decoder.run(None, {**decoder_inputs, **past_key_values})
+            times.append(time.time() - start)
+        print("DECODER: Onnx latency:", np.mean(times[50:])*1000)
         # converts each value of the list to tensor from numpy
         list_pkv = tuple(torch.from_numpy(x) for x in decoder_outputs[1:])
 

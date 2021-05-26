@@ -174,6 +174,9 @@ def generate_onnx_representation(pretrained_version=None, model=None):
             output_names=decoder_output_names,
             dynamic_axes=dyn_axis_params,
         )
+        print("Decoder: ", [x.shape for x in decoder_all_inputs])
+        trace = torch.jit.trace(decoder_with_lm_head, decoder_all_inputs)
+        torch.jit.save(trace, decoder_path.as_posix().replace(".onnx", ".pth"))
         bar.next()
 
         torch.onnx.export(
@@ -191,6 +194,9 @@ def generate_onnx_representation(pretrained_version=None, model=None):
                 "hidden_states": {0: "batch", 1: "sequence"},
             },
         )
+        print("Encoder: ", [x.shape for x in (input_ids, attention_mask)])
+        trace = torch.jit.trace(simplified_encoder, (input_ids, attention_mask))
+        torch.jit.save(trace, encoder_path.as_posix().replace(".onnx", ".pth"))
         bar.next()
         # initial decoder to produce past key values
         torch.onnx.export(
@@ -214,6 +220,9 @@ def generate_onnx_representation(pretrained_version=None, model=None):
                 "encoder_attention_mask": {0: "batch", 1: "sequence"},
             },
         )
+        print("Decoder init: ", [x.shape for x in (input_ids_dec, attention_mask_dec, enc_out)])
+        trace = torch.jit.trace(decoder_with_lm_head_init, (input_ids_dec, attention_mask_dec, enc_out))
+        torch.jit.save(trace, init_decoder_path.as_posix().replace(".onnx", ".pth"))
         bar.next()
         bar.finish()
 

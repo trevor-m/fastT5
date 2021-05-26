@@ -4,7 +4,7 @@ from fastT5.model_testing_tools import speed_test
 
 model_or_model_path = "t5-small"
 
-model = export_and_get_onnx_model(model_or_model_path)
+model = export_and_get_onnx_model(model_or_model_path, quantized=False)
 
 # if you've already exported the models
 # model = get_onnx_model(model_or_model_path)
@@ -19,7 +19,7 @@ input_ids = token["input_ids"]
 attention_mask = token["attention_mask"]
 
 # 'set num_beams = 1' for greedy search
-tokens = model.generate(input_ids=input_ids, attention_mask=attention_mask, num_beams=2)
+tokens = model.generate(input_ids=input_ids, attention_mask=attention_mask, num_beams=5)
 
 output = tokenizer.decode(tokens.squeeze(), skip_special_tokens=True)
 
